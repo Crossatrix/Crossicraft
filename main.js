@@ -4,12 +4,12 @@ import * as THREE from "three";
 /*  Config                                                             */
 /* ------------------------------------------------------------------ */
 
-const WORLD_SIZE = 32;     // dirt layer is WORLD_SIZE x WORLD_SIZE blocks
+const WORLD_SIZE = 64;     // dirt layer is WORLD_SIZE x WORLD_SIZE blocks
 const BLOCK_SIZE = 1;
 const REACH = 6;           // how far you can break/place blocks
 const GRAVITY = -20;
 const JUMP_SPEED = 7.5;
-const MOVE_SPEED = 5.5;
+const MOVE_SPEED = 3;
 const PLAYER_HEIGHT = 1.7;
 const PLAYER_RADIUS = 0.3;
 const EYE_HEIGHT = 1.6;
@@ -93,7 +93,11 @@ function loadBlockTexture(path) {
   return tex;
 }
 
-/* Block type registry — add new blocks here and they show up in the hotbar */
+/* Block type registry — add new blocks here and they show up in the hotbar.
+   Most blocks use one texture on every face ("texture"). Blocks with
+   different top/bottom vs side textures (like logs) use "textureTop" /
+   "textureSide" instead. Blocks that should render with transparency
+   (like leaves) set "transparent: true". */
 const BLOCK_TYPES = [
   {
     id: "dirt",
@@ -105,11 +109,40 @@ const BLOCK_TYPES = [
     label: "Cobblestone",
     texture: "assets/textures/cobblestone.png",
   },
+  {
+    id: "oak_log",
+    label: "Oak Log",
+    textureTop: "assets/textures/oak_log_top.png",
+    textureSide: "assets/textures/oak_log_side.png",
+  },
+  {
+    id: "oak_leaves",
+    label: "Oak Leaves",
+    texture: "assets/textures/oak_leaves.png",
+    transparent: true,
+  },
 ];
 
+function makeMaterial(texturePath, transparent) {
+  const tex = loadBlockTexture(texturePath);
+  return new THREE.MeshLambertMaterial({
+    map: tex,
+    transparent: !!transparent,
+    alphaTest: transparent ? 0.5 : 0, // avoid sorting artifacts on leaves
+  });
+}
+
 for (const type of BLOCK_TYPES) {
-  const tex = loadBlockTexture(type.texture);
-  type.material = new THREE.MeshLambertMaterial({ map: tex });
+  if (type.textureTop && type.textureSide) {
+    // BoxGeometry face order: +x, -x, +y (top), -y (bottom), +z, -z
+    const side = makeMaterial(type.textureSide, type.transparent);
+    const top = makeMaterial(type.textureTop, type.transparent);
+    type.material = [side, side, top, top, side, side];
+    type.icon = type.textureSide; // used for the hotbar icon
+  } else {
+    type.material = makeMaterial(type.texture, type.transparent);
+    type.icon = type.texture;
+  }
 }
 
 function materialFor(id) {
@@ -167,6 +200,75 @@ for (let x = -half; x < half; x++) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Trees                                                               */
+/* ------------------------------------------------------------------ */
+
+const oakLogMaterial = materialFor("oak_log");
+const oakLeavesMaterial = materialFor("oak_leaves");
+
+function placeTree(x, z) {
+  // Trunk: 4 logs tall, starting on top of the dirt layer (y = 1..4)
+  const trunkHeight = 4;
+  for (let i = 0; i < trunkHeight; i++) {
+    addBlock(x, 1 + i, z, oakLogMaterial);
+  }
+
+  // Canopy: a rounded blob of leaves around the top of the trunk.
+  // topY is the log's top block; leaves span one below to two above it.
+  const topY = trunkHeight; // y of the top trunk block
+  for (let dx = -2; dx <= 2; dx++) {
+    for (let dz = -2; dz <= 2; dz++) {
+      for (let dy = -1; dy <= 2; dy++) {
+        const dist = Math.abs(dx) + Math.abs(dz) + Math.abs(dy);
+        // Skip corners for a rounder canopy, and skip the trunk column
+        if (dist > 3) continue;
+        if (dx === 0 && dz === 0 && dy <= 0) continue;
+
+        const lx = x + dx;
+        const ly = topY + dy;
+        const lz = z + dz;
+        if (!hasBlock(lx, ly, lz)) {
+          addBlock(lx, ly, lz, oakLeavesMaterial);
+        }
+      }
+    }
+  }
+}
+
+function generateTrees() {
+  const TREE_COUNT = Math.round((WORLD_SIZE * WORLD_SIZE) / 90); // sparse-ish
+  const MIN_SPACING = 5; // blocks between trunks, so canopies don't overlap
+  const EDGE_MARGIN = 3; // keep trees off the very edge of the island
+  const placed = [];
+
+  let attempts = 0;
+  while (placed.length < TREE_COUNT && attempts < TREE_COUNT * 30) {
+    attempts++;
+    const x =
+      Math.floor(Math.random() * (WORLD_SIZE - EDGE_MARGIN * 2)) -
+      half +
+      EDGE_MARGIN;
+    const z =
+      Math.floor(Math.random() * (WORLD_SIZE - EDGE_MARGIN * 2)) -
+      half +
+      EDGE_MARGIN;
+
+    const tooClose = placed.some(
+      (p) => Math.abs(p.x - x) < MIN_SPACING && Math.abs(p.z - z) < MIN_SPACING
+    );
+    if (tooClose) continue;
+
+    // Keep a clear landing zone around the player's spawn point (0, _, 5)
+    if (Math.abs(x - 0) < 3 && Math.abs(z - 5) < 3) continue;
+
+    placed.push({ x, z });
+    placeTree(x, z);
+  }
+}
+
+generateTrees();
+
+/* ------------------------------------------------------------------ */
 /*  Player: position, physics, first-person controls                   */
 /* ------------------------------------------------------------------ */
 
@@ -204,7 +306,7 @@ function buildHotbar() {
 
     const icon = document.createElement("div");
     icon.className = "hotbar-icon";
-    icon.style.backgroundImage = `url(${type.texture})`;
+    icon.style.backgroundImage = `url(${type.icon})`;
     slot.appendChild(icon);
 
     const key = document.createElement("span");
