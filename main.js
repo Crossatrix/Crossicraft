@@ -14,6 +14,14 @@ const PLAYER_HEIGHT = 1.7;
 const PLAYER_RADIUS = 0.3;
 const EYE_HEIGHT = 1.6;
 
+const IS_TOUCH_DEVICE =
+  "ontouchstart" in window || navigator.maxTouchPoints > 0;
+
+if (IS_TOUCH_DEVICE) {
+  document.body.classList.add("touch-device");
+  document.getElementById("hint").textContent = "Tap to play";
+}
+
 /* ------------------------------------------------------------------ */
 /*  Renderer / Scene / Camera                                          */
 /* ------------------------------------------------------------------ */
@@ -146,26 +154,205 @@ const keys = {};
 window.addEventListener("keydown", (e) => (keys[e.code] = true));
 window.addEventListener("keyup", (e) => (keys[e.code] = false));
 
-// Pointer lock for mouse look
-document.body.addEventListener("click", () => {
-  if (document.pointerLockElement !== canvas) {
-    canvas.requestPointerLock();
+if (!IS_TOUCH_DEVICE) {
+  // Pointer lock for mouse look (desktop only)
+  document.body.addEventListener("click", () => {
+    if (document.pointerLockElement !== canvas) {
+      canvas.requestPointerLock();
+    }
+  });
+
+  document.addEventListener("pointerlockchange", () => {
+    const playing = document.pointerLockElement === canvas;
+    document.body.classList.toggle("playing", playing);
+  });
+
+  document.addEventListener("mousemove", (e) => {
+    if (document.pointerLockElement !== canvas) return;
+    const sensitivity = 0.0022;
+    player.yaw -= e.movementX * sensitivity;
+    player.pitch -= e.movementY * sensitivity;
+    const limit = Math.PI / 2 - 0.05;
+    player.pitch = Math.max(-limit, Math.min(limit, player.pitch));
+  });
+} else {
+  // On touch, just dismiss the hint and start the game on first tap
+  document.body.addEventListener(
+    "touchstart",
+    () => document.body.classList.add("playing"),
+    { once: true, passive: true }
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Touch controls: joystick (move), drag zone (look), action buttons  */
+/* ------------------------------------------------------------------ */
+
+// Movement input, shared between keyboard (WASD) and joystick.
+// Keyboard sets `keys[...]`; joystick writes directly into this vector,
+// which updatePlayerPhysics() reads in addition to the keys.
+const touchMove = { x: 0, y: 0 }; // x: strafe (-1..1), y: forward/back (-1..1)
+
+if (IS_TOUCH_DEVICE) {
+  /* ---------------- Joystick (movement) ---------------- */
+
+  const joystickZone = document.getElementById("joystick-zone");
+  const joystickBase = document.getElementById("joystick-base");
+  const joystickStick = document.getElementById("joystick-stick");
+
+  let joystickTouchId = null;
+  let baseCenter = { x: 0, y: 0 };
+  const JOYSTICK_RADIUS = 55; // px, matches #joystick-base half-width
+
+  function setStick(dx, dy) {
+    joystickStick.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
   }
-});
 
-document.addEventListener("pointerlockchange", () => {
-  const playing = document.pointerLockElement === canvas;
-  document.body.classList.toggle("playing", playing);
-});
+  function resetJoystick() {
+    joystickTouchId = null;
+    touchMove.x = 0;
+    touchMove.y = 0;
+    setStick(0, 0);
+  }
 
-document.addEventListener("mousemove", (e) => {
-  if (document.pointerLockElement !== canvas) return;
-  const sensitivity = 0.0022;
-  player.yaw -= e.movementX * sensitivity;
-  player.pitch -= e.movementY * sensitivity;
-  const limit = Math.PI / 2 - 0.05;
-  player.pitch = Math.max(-limit, Math.min(limit, player.pitch));
-});
+  joystickZone.addEventListener(
+    "touchstart",
+    (e) => {
+      if (joystickTouchId !== null) return;
+      const t = e.changedTouches[0];
+      joystickTouchId = t.identifier;
+      const rect = joystickBase.getBoundingClientRect();
+      baseCenter = {
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2,
+      };
+      updateJoystick(t);
+      e.preventDefault();
+    },
+    { passive: false }
+  );
+
+  function updateJoystick(touch) {
+    let dx = touch.clientX - baseCenter.x;
+    let dy = touch.clientY - baseCenter.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist > JOYSTICK_RADIUS) {
+      dx = (dx / dist) * JOYSTICK_RADIUS;
+      dy = (dy / dist) * JOYSTICK_RADIUS;
+    }
+    setStick(dx, dy);
+    // Normalize to -1..1, y inverted so "up" = forward
+    touchMove.x = dx / JOYSTICK_RADIUS;
+    touchMove.y = dy / JOYSTICK_RADIUS;
+  }
+
+  window.addEventListener(
+    "touchmove",
+    (e) => {
+      if (joystickTouchId === null) return;
+      for (const t of e.changedTouches) {
+        if (t.identifier === joystickTouchId) {
+          updateJoystick(t);
+          e.preventDefault();
+        }
+      }
+    },
+    { passive: false }
+  );
+
+  window.addEventListener("touchend", (e) => {
+    for (const t of e.changedTouches) {
+      if (t.identifier === joystickTouchId) resetJoystick();
+    }
+  });
+  window.addEventListener("touchcancel", (e) => {
+    for (const t of e.changedTouches) {
+      if (t.identifier === joystickTouchId) resetJoystick();
+    }
+  });
+
+  /* ---------------- Drag-to-look ---------------- */
+
+  const lookZone = document.getElementById("look-zone");
+  let lookTouchId = null;
+  let lastLook = { x: 0, y: 0 };
+  const LOOK_SENSITIVITY = 0.0055;
+
+  lookZone.addEventListener(
+    "touchstart",
+    (e) => {
+      if (lookTouchId !== null) return;
+      const t = e.changedTouches[0];
+      lookTouchId = t.identifier;
+      lastLook = { x: t.clientX, y: t.clientY };
+      e.preventDefault();
+    },
+    { passive: false }
+  );
+
+  lookZone.addEventListener(
+    "touchmove",
+    (e) => {
+      for (const t of e.changedTouches) {
+        if (t.identifier !== lookTouchId) continue;
+        const dx = t.clientX - lastLook.x;
+        const dy = t.clientY - lastLook.y;
+        lastLook = { x: t.clientX, y: t.clientY };
+
+        player.yaw -= dx * LOOK_SENSITIVITY;
+        player.pitch -= dy * LOOK_SENSITIVITY;
+        const limit = Math.PI / 2 - 0.05;
+        player.pitch = Math.max(-limit, Math.min(limit, player.pitch));
+        e.preventDefault();
+      }
+    },
+    { passive: false }
+  );
+
+  function endLook(e) {
+    for (const t of e.changedTouches) {
+      if (t.identifier === lookTouchId) lookTouchId = null;
+    }
+  }
+  lookZone.addEventListener("touchend", endLook);
+  lookZone.addEventListener("touchcancel", endLook);
+
+  /* ---------------- Action buttons ---------------- */
+
+  const btnJump = document.getElementById("btn-jump");
+  const btnBreak = document.getElementById("btn-break");
+  const btnPlace = document.getElementById("btn-place");
+
+  function bindHoldButton(el, onDown, onUp) {
+    el.addEventListener(
+      "touchstart",
+      (e) => {
+        el.classList.add("active");
+        onDown();
+        e.preventDefault();
+      },
+      { passive: false }
+    );
+    const release = (e) => {
+      el.classList.remove("active");
+      if (onUp) onUp();
+      if (e) e.preventDefault();
+    };
+    el.addEventListener("touchend", release, { passive: false });
+    el.addEventListener("touchcancel", release, { passive: false });
+  }
+
+  bindHoldButton(
+    btnJump,
+    () => (keys["Space"] = true),
+    () => (keys["Space"] = false)
+  );
+
+  // Break/place are tap actions (one block per tap), reusing the same
+  // raycast-from-screen-center logic as the desktop mouse handlers.
+  bindHoldButton(btnBreak, () => performBlockAction("break"));
+  bindHoldButton(btnPlace, () => performBlockAction("place"));
+}
 
 /* ---- Simple AABB collision against the block grid ---- */
 
@@ -209,8 +396,16 @@ function updatePlayerPhysics(dt) {
   if (keys["KeyA"]) move.sub(right);
   if (keys["KeyD"]) move.add(right);
 
+  // Joystick input (touch): x = strafe, y = forward/back, each -1..1
+  if (touchMove.x !== 0 || touchMove.y !== 0) {
+    move.addScaledVector(right, touchMove.x);
+    move.addScaledVector(forward, touchMove.y);
+  }
+
   if (move.lengthSq() > 0) {
-    move.normalize().multiplyScalar(MOVE_SPEED);
+    // Clamp so diagonal keyboard+joystick input isn't faster than normal
+    if (move.length() > 1) move.normalize();
+    move.multiplyScalar(MOVE_SPEED);
   }
 
   // -- jump / gravity --
@@ -258,9 +453,7 @@ const raycaster = new THREE.Raycaster();
 raycaster.far = REACH;
 const centerScreen = new THREE.Vector2(0, 0);
 
-canvas.addEventListener("mousedown", (e) => {
-  if (document.pointerLockElement !== canvas) return;
-
+function performBlockAction(action) {
   raycaster.setFromCamera(centerScreen, camera);
   const hits = raycaster.intersectObjects([...blocks.values()], false);
   if (hits.length === 0) return;
@@ -268,11 +461,10 @@ canvas.addEventListener("mousedown", (e) => {
   const hit = hits[0];
   const { x, y, z } = hit.object.userData.gridPos;
 
-  if (e.button === 0) {
-    // Left click: break block
+  if (action === "break") {
     removeBlock(x, y, z);
-  } else if (e.button === 2) {
-    // Right click: place block on the face that was clicked
+  } else if (action === "place") {
+    // Place block on the face that was hit
     const normal = hit.face.normal;
     const nx = x + Math.round(normal.x);
     const ny = y + Math.round(normal.y);
@@ -289,6 +481,12 @@ canvas.addEventListener("mousedown", (e) => {
       addBlock(nx, ny, nz);
     }
   }
+}
+
+canvas.addEventListener("mousedown", (e) => {
+  if (document.pointerLockElement !== canvas) return;
+  if (e.button === 0) performBlockAction("break");
+  else if (e.button === 2) performBlockAction("place");
 });
 
 canvas.addEventListener("contextmenu", (e) => e.preventDefault());
