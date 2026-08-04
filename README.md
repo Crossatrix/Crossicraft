@@ -1,8 +1,8 @@
 # MyCraft
 
 A tiny browser-based Minecraft clone using Three.js. Right now it's a flat
-32×32 layer of dirt blocks you can walk around, break, and place — a starting
-point to build on.
+64×64 island of dirt with randomly generated oak trees, which you can walk
+around, break, and place blocks on — a starting point to build on.
 
 ## Add your textures
 
@@ -11,14 +11,20 @@ Put your textures here (exact paths matter):
 ```
 assets/textures/dirt.png
 assets/textures/cobblestone.png
+assets/textures/oak_log_side.png
+assets/textures/oak_log_top.png
+assets/textures/oak_leaves.png
 ```
 
 Use small square images (e.g. 16×16) for the classic pixel-art look —
 the renderer uses nearest-neighbor filtering so they stay crisp instead of
-blurry.
+blurry. `oak_leaves.png` should have transparent pixels (use a PNG with
+alpha) for gaps in the canopy.
 
 To add more block types later, add an entry to the `BLOCK_TYPES` array near
-the top of `main.js` — it automatically appears in the hotbar.
+the top of `main.js` — it automatically appears in the hotbar. Blocks with
+a top/bottom texture different from their sides (like logs) use
+`textureTop` / `textureSide` instead of a single `texture`.
 
 ## Run locally
 
@@ -40,7 +46,7 @@ Then open http://localhost:8080. (Opening index.html directly via
 - **Mouse** — look around
 - **Left click** — break the block you're looking at
 - **Right click** — place the selected hotbar block
-- **1 / 2** — switch hotbar block (dirt / cobblestone)
+- **1 / 2 / 3 / 4** — switch hotbar block (dirt / cobblestone / oak log / oak leaves)
 - **Esc** — release the mouse
 
 **Mobile / touch**
