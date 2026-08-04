@@ -19,6 +19,24 @@
     </div>
   </div>
 
+  <!-- Touch controls (shown only on touch devices, see main.js) -->
+  <div id="touch-controls">
+    <div id="joystick-zone">
+      <div id="joystick-base">
+        <div id="joystick-stick"></div>
+      </div>
+    </div>
+
+    <div id="touch-action-buttons">
+      <button id="btn-place" class="touch-btn" aria-label="Place block">+</button>
+      <button id="btn-break" class="touch-btn" aria-label="Break block">×</button>
+      <button id="btn-jump" class="touch-btn" aria-label="Jump">↑</button>
+    </div>
+
+    <!-- Invisible full-right-side layer that captures drag-to-look -->
+    <div id="look-zone"></div>
+  </div>
+
   <script type="importmap">
     {
       "imports": {
