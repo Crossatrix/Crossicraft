@@ -547,6 +547,23 @@ const raycaster = new THREE.Raycaster();
 raycaster.far = REACH;
 const centerScreen = new THREE.Vector2(0, 0);
 
+// Returns true if a block placed at grid cell (bx, by, bz) would overlap
+// the player's bounding box (feet at eye-height minus PLAYER_HEIGHT,
+// head at eye-height, footprint of PLAYER_RADIUS around the position).
+function wouldPlacementHitPlayer(bx, by, bz) {
+  const r = PLAYER_RADIUS;
+  const feet = player.position.y - EYE_HEIGHT;
+  const head = player.position.y - EYE_HEIGHT + PLAYER_HEIGHT;
+
+  const overlapsX =
+    bx + 1 > player.position.x - r && bx < player.position.x + r;
+  const overlapsZ =
+    bz + 1 > player.position.z - r && bz < player.position.z + r;
+  const overlapsY = by + 1 > feet && by < head;
+
+  return overlapsX && overlapsY && overlapsZ;
+}
+
 function performBlockAction(action) {
   raycaster.setFromCamera(centerScreen, camera);
   const hits = raycaster.intersectObjects([...blocks.values()], false);
@@ -564,14 +581,8 @@ function performBlockAction(action) {
     const ny = y + Math.round(normal.y);
     const nz = z + Math.round(normal.z);
 
-    // Don't place a block inside the player
-    const wouldCollide =
-      Math.abs(nx - player.position.x) < 0.6 &&
-      Math.abs(nz - player.position.z) < 0.6 &&
-      ny > player.position.y - EYE_HEIGHT - 0.1 &&
-      ny < player.position.y - EYE_HEIGHT + PLAYER_HEIGHT;
-
-    if (!wouldCollide) {
+    // Don't place a block inside a cell the player currently occupies
+    if (!wouldPlacementHitPlayer(nx, ny, nz)) {
       addBlock(nx, ny, nz, selectedMaterial());
     }
   }
