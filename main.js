@@ -4,7 +4,7 @@ import * as THREE from "three";
 /*  Config                                                             */
 /* ------------------------------------------------------------------ */
 
-const WORLD_SIZE = 300;     // dirt layer is WORLD_SIZE x WORLD_SIZE blocks
+const WORLD_SIZE = 64;     // dirt layer is WORLD_SIZE x WORLD_SIZE blocks
 const BLOCK_SIZE = 1;
 const REACH = 6;           // how far you can break/place blocks
 const GRAVITY = -20;
@@ -169,13 +169,6 @@ for (const type of BLOCK_TYPES) {
   }
 }
 
-function materialFor(id) {
-  return BLOCK_TYPES.find((t) => t.id === id).material;
-}
-
-const dirtMaterial = materialFor("dirt"); // fallback material for addBlock()
-const grassMaterial = materialFor("grass"); // world surface layer
-
 /* ------------------------------------------------------------------ */
 /*  World: a flat layer of dirt blocks                                 */
 /* ------------------------------------------------------------------ */
@@ -184,43 +177,115 @@ const grassMaterial = materialFor("grass"); // world surface layer
   them up for raycasting / breaking / placing.
 */
 
-const blocks = new Map();
+/* ------------------------------------------------------------------ */
+/*  Block storage                                                       */
+/* ------------------------------------------------------------------ */
+/*
+  Perf note: earlier versions created one THREE.Mesh per block, which
+  means one draw call per block — that's fine for a few hundred blocks,
+  but tanks the frame rate once the world + trees add up to thousands.
+
+  Instead, each block TYPE gets one THREE.InstancedMesh (so ~7 draw calls
+  total no matter how many blocks exist). Each instance's transform is
+  just a translation to its grid position. A separate lightweight grid
+  map tracks *what* is at each position for collision and breaking/
+  placing, decoupled from rendering.
+*/
+
+const MAX_INSTANCES_PER_TYPE = WORLD_SIZE * WORLD_SIZE * 6; // generous cap
 const blockGeometry = new THREE.BoxGeometry(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
+
+// grid: "x,y,z" -> { typeId, instanceId }
+const grid = new Map();
+
+// Per-type instanced mesh + bookkeeping to add/remove instances and know
+// which grid key lives at which instance slot (needed to raycast back to
+// a grid position, and to fill the hole left when removing a block).
+const instancedMeshes = new Map(); // typeId -> { mesh, count, slotToKey: [] }
+
+function initInstancedMeshes() {
+  for (const type of BLOCK_TYPES) {
+    const mesh = new THREE.InstancedMesh(
+      blockGeometry,
+      type.material,
+      MAX_INSTANCES_PER_TYPE
+    );
+    mesh.count = 0;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    // These meshes can span the whole world, and their bounds change on
+    // every block add/remove — recomputing a bounding sphere each time
+    // is wasted work for something that's rarely fully off-screen anyway.
+    mesh.frustumCulled = false;
+    // Give raycasting a way to map a hit back to a grid key
+    mesh.userData.typeId = type.id;
+    scene.add(mesh);
+    instancedMeshes.set(type.id, { mesh, slotToKey: [] });
+  }
+}
+
+const _matrix = new THREE.Matrix4();
 
 function keyFor(x, y, z) {
   return `${x},${y},${z}`;
 }
 
-function addBlock(x, y, z, material = dirtMaterial) {
+function addBlock(x, y, z, typeId = "dirt") {
   const k = keyFor(x, y, z);
-  if (blocks.has(k)) return;
+  if (grid.has(k)) return;
 
-  const mesh = new THREE.Mesh(blockGeometry, material);
-  mesh.position.set(x, y, z);
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  mesh.userData.gridPos = { x, y, z };
-  scene.add(mesh);
-  blocks.set(k, mesh);
+  const entry = instancedMeshes.get(typeId);
+  const slot = entry.mesh.count;
+  entry.mesh.count = slot + 1;
+
+  _matrix.makeTranslation(x, y, z);
+  entry.mesh.setMatrixAt(slot, _matrix);
+  entry.mesh.instanceMatrix.needsUpdate = true;
+
+  entry.slotToKey[slot] = k;
+  grid.set(k, { typeId, instanceId: slot });
 }
 
 function removeBlock(x, y, z) {
   const k = keyFor(x, y, z);
-  const mesh = blocks.get(k);
-  if (!mesh) return;
-  scene.remove(mesh);
-  blocks.delete(k);
+  const info = grid.get(k);
+  if (!info) return;
+
+  const entry = instancedMeshes.get(info.typeId);
+  const lastSlot = entry.mesh.count - 1;
+  const removedSlot = info.instanceId;
+
+  if (removedSlot !== lastSlot) {
+    // Move the last instance into the removed slot (swap-remove) so the
+    // instance buffer stays dense with no gaps.
+    const lastMatrix = new THREE.Matrix4();
+    entry.mesh.getMatrixAt(lastSlot, lastMatrix);
+    entry.mesh.setMatrixAt(removedSlot, lastMatrix);
+
+    const movedKey = entry.slotToKey[lastSlot];
+    entry.slotToKey[removedSlot] = movedKey;
+    grid.get(movedKey).instanceId = removedSlot;
+  }
+
+  entry.slotToKey.pop();
+  entry.mesh.count = lastSlot;
+  entry.mesh.instanceMatrix.needsUpdate = true;
+
+  grid.delete(k);
 }
 
 function hasBlock(x, y, z) {
-  return blocks.has(keyFor(x, y, z));
+  return grid.has(keyFor(x, y, z));
 }
+
+initInstancedMeshes();
 
 // Generate the flat island: grass on the surface (y = 0)
 const half = Math.floor(WORLD_SIZE / 2);
 for (let x = -half; x < half; x++) {
   for (let z = -half; z < half; z++) {
-    addBlock(x, 0, z, grassMaterial);
+    addBlock(x, 0, z, "grass");
   }
 }
 
@@ -228,11 +293,11 @@ for (let x = -half; x < half; x++) {
 /*  Trees                                                               */
 /* ------------------------------------------------------------------ */
 
-// Each tree "species" pairs a log material with a leaf material so
+// Each tree "species" pairs a log block type with a leaf block type so
 // generateTrees() can pick one at random per tree.
 const TREE_SPECIES = [
-  { log: materialFor("oak_log"), leaves: materialFor("oak_leaves") },
-  { log: materialFor("birch_log"), leaves: materialFor("birch_leaves") },
+  { log: "oak_log", leaves: "oak_leaves" },
+  { log: "birch_log", leaves: "birch_leaves" },
 ];
 
 function placeTree(x, z, species) {
@@ -321,8 +386,8 @@ window.addEventListener("keyup", (e) => (keys[e.code] = false));
 
 let selectedBlockIndex = 0; // index into BLOCK_TYPES
 
-function selectedMaterial() {
-  return BLOCK_TYPES[selectedBlockIndex].material;
+function selectedTypeId() {
+  return BLOCK_TYPES[selectedBlockIndex].id;
 }
 
 function buildHotbar() {
@@ -604,6 +669,29 @@ function collidesAt(pos) {
   return false;
 }
 
+// -- integrate with simple axis-separated collision, substepped so fast
+//    motion (e.g. jump velocity) can't skip past a block's collision box
+//    entirely within one frame ("tunneling") --
+const MAX_STEP = 0.2; // max distance moved per substep, in blocks
+
+function moveAxis(axis, delta) {
+  if (delta === 0) return;
+  const steps = Math.max(1, Math.ceil(Math.abs(delta) / MAX_STEP));
+  const stepSize = delta / steps;
+  for (let i = 0; i < steps; i++) {
+    const next = player.position.clone();
+    next[axis] += stepSize;
+    if (collidesAt(next)) {
+      if (axis === "y") {
+        if (stepSize < 0) player.onGround = true;
+        player.velocity.y = 0;
+      }
+      return; // stop at first blocked substep on this axis
+    }
+    player.position.copy(next);
+  }
+}
+
 function updatePlayerPhysics(dt) {
   // -- movement input relative to look direction (yaw only) --
   const forward = new THREE.Vector3(
@@ -642,28 +730,14 @@ function updatePlayerPhysics(dt) {
   }
   player.velocity.y += GRAVITY * dt;
 
-  // -- integrate with simple axis-separated collision --
-  const next = player.position.clone();
+  // -- integrate with simple axis-separated collision, substepped so
+  //    fast motion (e.g. jump velocity) can't skip past a block's
+  //    collision box entirely within one frame ("tunneling") --
+  moveAxis("x", move.x * dt);
+  moveAxis("z", move.z * dt);
 
-  // X axis
-  next.x += move.x * dt;
-  if (collidesAt(next)) next.x = player.position.x;
-
-  // Z axis
-  next.z += move.z * dt;
-  if (collidesAt(next)) next.z = player.position.z;
-
-  // Y axis
-  next.y += player.velocity.y * dt;
-  if (collidesAt(next)) {
-    if (player.velocity.y < 0) player.onGround = true;
-    player.velocity.y = 0;
-    next.y = player.position.y;
-  } else {
-    player.onGround = false;
-  }
-
-  player.position.copy(next);
+  player.onGround = false;
+  moveAxis("y", player.velocity.y * dt);
 
   // Fallback: don't fall forever below the world
   if (player.position.y < -20) {
@@ -699,11 +773,16 @@ function wouldPlacementHitPlayer(bx, by, bz) {
 
 function performBlockAction(action) {
   raycaster.setFromCamera(centerScreen, camera);
-  const hits = raycaster.intersectObjects([...blocks.values()], false);
+  const meshes = [...instancedMeshes.values()].map((e) => e.mesh);
+  const hits = raycaster.intersectObjects(meshes, false);
   if (hits.length === 0) return;
 
   const hit = hits[0];
-  const { x, y, z } = hit.object.userData.gridPos;
+  const typeId = hit.object.userData.typeId;
+  const entry = instancedMeshes.get(typeId);
+  const k = entry.slotToKey[hit.instanceId];
+  if (!k) return;
+  const [x, y, z] = k.split(",").map(Number);
 
   if (action === "break") {
     removeBlock(x, y, z);
@@ -716,7 +795,7 @@ function performBlockAction(action) {
 
     // Don't place a block inside a cell the player currently occupies
     if (!wouldPlacementHitPlayer(nx, ny, nz)) {
-      addBlock(nx, ny, nz, selectedMaterial());
+      addBlock(nx, ny, nz, selectedTypeId());
     }
   }
 }
