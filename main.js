@@ -4,7 +4,7 @@ import * as THREE from "three";
 /*  Config                                                             */
 /* ------------------------------------------------------------------ */
 
-const WORLD_SIZE = 64;     // dirt layer is WORLD_SIZE x WORLD_SIZE blocks
+const WORLD_SIZE = 128;     // dirt layer is WORLD_SIZE x WORLD_SIZE blocks
 const BLOCK_SIZE = 1;
 const REACH = 6;           // how far you can break/place blocks
 const GRAVITY = -20;
