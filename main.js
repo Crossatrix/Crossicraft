@@ -15,7 +15,13 @@ const PLAYER_RADIUS = 0.3;
 const EYE_HEIGHT = 1.6;
 
 const IS_TOUCH_DEVICE =
-  "ontouchstart" in window || navigator.maxTouchPoints > 0;
+  "ontouchstart" in window ||
+  navigator.maxTouchPoints > 0 ||
+  navigator.msMaxTouchPoints > 0 ||
+  // iPadOS 13+ identifies as "MacIntel" in the UA but has touch points,
+  // caught above already — this is a belt-and-suspenders UA check for
+  // older/edge-case iPad UAs.
+  /iPad|iPhone|iPod|Android/i.test(navigator.userAgent);
 
 if (IS_TOUCH_DEVICE) {
   document.body.classList.add("touch-device");
@@ -87,8 +93,30 @@ function loadBlockTexture(path) {
   return tex;
 }
 
-const dirtTexture = loadBlockTexture("assets/textures/dirt.png");
-const dirtMaterial = new THREE.MeshLambertMaterial({ map: dirtTexture });
+/* Block type registry — add new blocks here and they show up in the hotbar */
+const BLOCK_TYPES = [
+  {
+    id: "dirt",
+    label: "Dirt",
+    texture: "assets/textures/dirt.png",
+  },
+  {
+    id: "cobblestone",
+    label: "Cobblestone",
+    texture: "assets/textures/cobblestone.png",
+  },
+];
+
+for (const type of BLOCK_TYPES) {
+  const tex = loadBlockTexture(type.texture);
+  type.material = new THREE.MeshLambertMaterial({ map: tex });
+}
+
+function materialFor(id) {
+  return BLOCK_TYPES.find((t) => t.id === id).material;
+}
+
+const dirtMaterial = materialFor("dirt"); // world floor is always dirt
 
 /* ------------------------------------------------------------------ */
 /*  World: a flat layer of dirt blocks                                 */
@@ -153,6 +181,72 @@ const player = {
 const keys = {};
 window.addEventListener("keydown", (e) => (keys[e.code] = true));
 window.addEventListener("keyup", (e) => (keys[e.code] = false));
+
+/* ------------------------------------------------------------------ */
+/*  Hotbar: pick which block type gets placed                          */
+/* ------------------------------------------------------------------ */
+
+let selectedBlockIndex = 0; // index into BLOCK_TYPES
+
+function selectedMaterial() {
+  return BLOCK_TYPES[selectedBlockIndex].material;
+}
+
+function buildHotbar() {
+  const hotbar = document.getElementById("hotbar");
+  hotbar.innerHTML = "";
+
+  BLOCK_TYPES.forEach((type, i) => {
+    const slot = document.createElement("button");
+    slot.className = "hotbar-slot";
+    slot.dataset.index = String(i);
+    slot.setAttribute("aria-label", type.label);
+
+    const icon = document.createElement("div");
+    icon.className = "hotbar-icon";
+    icon.style.backgroundImage = `url(${type.texture})`;
+    slot.appendChild(icon);
+
+    const key = document.createElement("span");
+    key.className = "hotbar-key";
+    key.textContent = String(i + 1);
+    slot.appendChild(key);
+
+    slot.addEventListener(
+      IS_TOUCH_DEVICE ? "touchstart" : "click",
+      (e) => {
+        selectedBlockIndex = i;
+        updateHotbarSelection();
+        e.preventDefault();
+      },
+      { passive: false }
+    );
+
+    hotbar.appendChild(slot);
+  });
+
+  updateHotbarSelection();
+}
+
+function updateHotbarSelection() {
+  document.querySelectorAll(".hotbar-slot").forEach((el) => {
+    el.classList.toggle(
+      "selected",
+      Number(el.dataset.index) === selectedBlockIndex
+    );
+  });
+}
+
+buildHotbar();
+
+// Number keys 1-9 select hotbar slots (desktop)
+window.addEventListener("keydown", (e) => {
+  const n = Number(e.key);
+  if (n >= 1 && n <= BLOCK_TYPES.length) {
+    selectedBlockIndex = n - 1;
+    updateHotbarSelection();
+  }
+});
 
 if (!IS_TOUCH_DEVICE) {
   // Pointer lock for mouse look (desktop only)
@@ -478,7 +572,7 @@ function performBlockAction(action) {
       ny < player.position.y - EYE_HEIGHT + PLAYER_HEIGHT;
 
     if (!wouldCollide) {
-      addBlock(nx, ny, nz);
+      addBlock(nx, ny, nz, selectedMaterial());
     }
   }
 }
