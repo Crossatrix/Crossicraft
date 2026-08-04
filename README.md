@@ -29,6 +29,7 @@ Then open http://localhost:8080. (Opening index.html directly via
 
 ## Controls
 
+**Desktop**
 - **Click** the page to lock the mouse and start playing
 - **WASD** — move
 - **Space** — jump
@@ -36,6 +37,15 @@ Then open http://localhost:8080. (Opening index.html directly via
 - **Left click** — break the block you're looking at
 - **Right click** — place a dirt block
 - **Esc** — release the mouse
+
+**Mobile / touch**
+- Touch device is auto-detected — the touch UI appears automatically, no
+  desktop controls are shown
+- **Left-side joystick** — move
+- **Drag anywhere on screen** — look around
+- **↑ button** — jump
+- **× button** — break the block in the crosshair
+- **+ button** — place a dirt block
 
 ## Deploy to GitHub Pages
 
