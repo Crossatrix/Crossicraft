@@ -96,9 +96,18 @@ function loadBlockTexture(path) {
 /* Block type registry — add new blocks here and they show up in the hotbar.
    Most blocks use one texture on every face ("texture"). Blocks with
    different top/bottom vs side textures (like logs) use "textureTop" /
-   "textureSide" instead. Blocks that should render with transparency
+   "textureSide" instead. Blocks where all three (top/side/bottom) differ
+   (like grass) additionally set "textureBottom" — otherwise bottom falls
+   back to the top texture. Blocks that should render with transparency
    (like leaves) set "transparent: true". */
 const BLOCK_TYPES = [
+  {
+    id: "grass",
+    label: "Grass",
+    textureTop: "assets/textures/grass_top.png",
+    textureSide: "assets/textures/grass_side.png",
+    textureBottom: "assets/textures/dirt.png",
+  },
   {
     id: "dirt",
     label: "Dirt",
@@ -121,6 +130,18 @@ const BLOCK_TYPES = [
     texture: "assets/textures/oak_leaves.png",
     transparent: true,
   },
+  {
+    id: "birch_log",
+    label: "Birch Log",
+    textureTop: "assets/textures/birch_log_top.png",
+    textureSide: "assets/textures/birch_log_side.png",
+  },
+  {
+    id: "birch_leaves",
+    label: "Birch Leaves",
+    texture: "assets/textures/birch_leaves.png",
+    transparent: true,
+  },
 ];
 
 function makeMaterial(texturePath, transparent) {
@@ -137,7 +158,10 @@ for (const type of BLOCK_TYPES) {
     // BoxGeometry face order: +x, -x, +y (top), -y (bottom), +z, -z
     const side = makeMaterial(type.textureSide, type.transparent);
     const top = makeMaterial(type.textureTop, type.transparent);
-    type.material = [side, side, top, top, side, side];
+    const bottom = type.textureBottom
+      ? makeMaterial(type.textureBottom, type.transparent)
+      : top;
+    type.material = [side, side, top, bottom, side, side];
     type.icon = type.textureSide; // used for the hotbar icon
   } else {
     type.material = makeMaterial(type.texture, type.transparent);
@@ -149,7 +173,8 @@ function materialFor(id) {
   return BLOCK_TYPES.find((t) => t.id === id).material;
 }
 
-const dirtMaterial = materialFor("dirt"); // world floor is always dirt
+const dirtMaterial = materialFor("dirt"); // fallback material for addBlock()
+const grassMaterial = materialFor("grass"); // world surface layer
 
 /* ------------------------------------------------------------------ */
 /*  World: a flat layer of dirt blocks                                 */
@@ -191,11 +216,11 @@ function hasBlock(x, y, z) {
   return blocks.has(keyFor(x, y, z));
 }
 
-// Generate the flat dirt layer at y = 0
+// Generate the flat island: grass on the surface (y = 0)
 const half = Math.floor(WORLD_SIZE / 2);
 for (let x = -half; x < half; x++) {
   for (let z = -half; z < half; z++) {
-    addBlock(x, 0, z);
+    addBlock(x, 0, z, grassMaterial);
   }
 }
 
@@ -203,14 +228,18 @@ for (let x = -half; x < half; x++) {
 /*  Trees                                                               */
 /* ------------------------------------------------------------------ */
 
-const oakLogMaterial = materialFor("oak_log");
-const oakLeavesMaterial = materialFor("oak_leaves");
+// Each tree "species" pairs a log material with a leaf material so
+// generateTrees() can pick one at random per tree.
+const TREE_SPECIES = [
+  { log: materialFor("oak_log"), leaves: materialFor("oak_leaves") },
+  { log: materialFor("birch_log"), leaves: materialFor("birch_leaves") },
+];
 
-function placeTree(x, z) {
-  // Trunk: 4 logs tall, starting on top of the dirt layer (y = 1..4)
+function placeTree(x, z, species) {
+  // Trunk: 4 logs tall, starting on top of the grass layer (y = 1..4)
   const trunkHeight = 4;
   for (let i = 0; i < trunkHeight; i++) {
-    addBlock(x, 1 + i, z, oakLogMaterial);
+    addBlock(x, 1 + i, z, species.log);
   }
 
   // Canopy: a rounded blob of leaves around the top of the trunk.
@@ -228,7 +257,7 @@ function placeTree(x, z) {
         const ly = topY + dy;
         const lz = z + dz;
         if (!hasBlock(lx, ly, lz)) {
-          addBlock(lx, ly, lz, oakLeavesMaterial);
+          addBlock(lx, ly, lz, species.leaves);
         }
       }
     }
@@ -262,7 +291,9 @@ function generateTrees() {
     if (Math.abs(x - 0) < 3 && Math.abs(z - 5) < 3) continue;
 
     placed.push({ x, z });
-    placeTree(x, z);
+    const species =
+      TREE_SPECIES[Math.floor(Math.random() * TREE_SPECIES.length)];
+    placeTree(x, z, species);
   }
 }
 
