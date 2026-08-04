@@ -4,14 +4,14 @@ import * as THREE from "three";
 /*  Config                                                             */
 /* ------------------------------------------------------------------ */
 
-const WORLD_SIZE = 128;     // dirt layer is WORLD_SIZE x WORLD_SIZE blocks
+const WORLD_SIZE = 256;     // dirt layer is WORLD_SIZE x WORLD_SIZE blocks
 const BLOCK_SIZE = 1;
 const REACH = 6;           // how far you can break/place blocks
 const GRAVITY = -20;
 const JUMP_SPEED = 7.5;
 const MOVE_SPEED = 3;
 const PLAYER_HEIGHT = 1.7;
-const PLAYER_RADIUS = 0.3;
+const PLAYER_RADIUS = 0.5;
 const EYE_HEIGHT = 1.6;
 
 const IS_TOUCH_DEVICE =
