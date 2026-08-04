@@ -4,17 +4,21 @@ A tiny browser-based Minecraft clone using Three.js. Right now it's a flat
 32×32 layer of dirt blocks you can walk around, break, and place — a starting
 point to build on.
 
-## Add your texture
+## Add your textures
 
-Put your texture here (exact path matters):
+Put your textures here (exact paths matter):
 
 ```
 assets/textures/dirt.png
+assets/textures/cobblestone.png
 ```
 
-Use a small square image (e.g. 16×16) for the classic pixel-art look —
-the renderer uses nearest-neighbor filtering so it stays crisp instead of
+Use small square images (e.g. 16×16) for the classic pixel-art look —
+the renderer uses nearest-neighbor filtering so they stay crisp instead of
 blurry.
+
+To add more block types later, add an entry to the `BLOCK_TYPES` array near
+the top of `main.js` — it automatically appears in the hotbar.
 
 ## Run locally
 
@@ -35,17 +39,19 @@ Then open http://localhost:8080. (Opening index.html directly via
 - **Space** — jump
 - **Mouse** — look around
 - **Left click** — break the block you're looking at
-- **Right click** — place a dirt block
+- **Right click** — place the selected hotbar block
+- **1 / 2** — switch hotbar block (dirt / cobblestone)
 - **Esc** — release the mouse
 
 **Mobile / touch**
-- Touch device is auto-detected — the touch UI appears automatically, no
-  desktop controls are shown
+- Touch device is auto-detected (iPad included) — the touch UI appears
+  automatically, no desktop controls are shown
 - **Left-side joystick** — move
 - **Drag anywhere on screen** — look around
 - **↑ button** — jump
 - **× button** — break the block in the crosshair
-- **+ button** — place a dirt block
+- **+ button** — place the selected hotbar block
+- **Hotbar icons (top center)** — tap to switch block type
 
 ## Deploy to GitHub Pages
 
